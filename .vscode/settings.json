@@ -1,0 +1,10 @@
+{
+  "files.associations": {
+    "jinja-html": "html",
+    "__config": "c",
+    "cstdlib": "c",
+    "locale": "c",
+    "new": "c",
+    "ostream": "c"
+  }
+}
