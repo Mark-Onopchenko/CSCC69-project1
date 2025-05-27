@@ -95,7 +95,8 @@ struct thread
 
     int original_priority;
     struct lock* wait_lock;
-    struct list donors;   /* Tracks top donors for any locks that the thread holds*/
+    struct list donors;
+    struct list_elem donorelem;
 
     int64_t wakeup;
     struct list_elem sleepelem;
