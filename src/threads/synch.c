@@ -64,30 +64,12 @@ sema_down (struct semaphore *sema)
 
   ASSERT (sema != NULL);
   ASSERT (!intr_context ());
-  struct thread* t = thread_current();
 
   old_level = intr_disable ();
   while (sema->value == 0)
     {
       list_insert_ordered (&sema->waiters, &thread_current()->elem, thread_priority_cmp, NULL);
-
-      // Recursively donates priority to the holder thread as well as to
-      // any thread that holds a lock that the thread is waiting on
-      struct lock* l = t->wait_lock;
-      while (l != NULL) {
-        struct thread* holder = l->holder;
-        // Donate to the holder
-        if (holder->priority < t->priority) {
-          // Set the holder's priority to the new one
-          holder->priority = t->priority;
-          // Add to donors list (sorted by priority)
-          list_insert_ordered(&holder->donors, &t->donorelem, (list_less_func*)&thread_priority_cmp, NULL);
-          // TODO: Potentially unblock the thread now that it has
-          // higher priority
-        }
-        l = holder->wait_lock;
-      }
-
+      donate_priority();
       thread_block ();
     }
   sema->value--;
@@ -279,7 +261,8 @@ lock_release (struct lock *lock)
   else
     cur->priority = cur->original_priority;
 
-  // TODO: possibly yield the thread
+  // Possibly yield the thread now that the priority has been recalculated
+  priority_yield();
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
