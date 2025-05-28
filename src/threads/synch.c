@@ -69,7 +69,6 @@ sema_down (struct semaphore *sema)
   while (sema->value == 0)
     {
       list_insert_ordered (&sema->waiters, &thread_current()->elem, thread_priority_cmp, NULL);
-      donate_priority();
       thread_block ();
     }
   sema->value--;
@@ -203,8 +202,9 @@ lock_acquire (struct lock *lock)
   // If not, donate priority to the holder
   if (lock->holder != NULL) {
     t->wait_lock = lock;
-    sema_down (&lock->semaphore);
+    donate_priority();
   }
+  sema_down (&lock->semaphore);
   lock->holder = t;
   intr_set_level(i);
   t->wait_lock = NULL;
@@ -243,23 +243,31 @@ lock_release (struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
 
   struct thread* cur = lock->holder;
+  struct list* donor_list = &cur->donors;
 
   // Remove all donors associated with the lock
-  struct list_elem* l = list_front(&cur->donors);
-  while (l != NULL) {
-    struct thread* donor = (struct thread*) list_entry(l, struct thread, donorelem);
+  struct list_elem* l = list_begin(donor_list);
+  while (l != list_end(donor_list)) {
+    struct thread* donor = list_entry(l, struct thread, donorelem);
+    struct list_elem* next = list_next(l);
     if (donor->wait_lock == lock)
-      list_remove(&donor->donorelem);
-    l = list_next(l);
+      list_remove(l);
+    l = next;
   }
-  // Recalculate priority by taking the top donor's priority
-  // this works cuz the list 'donors' is sorted by priority, desc
-  struct thread* next = (struct thread*) list_entry(list_front(&cur->donors), struct thread, donorelem);
 
-  if (next->priority > cur->original_priority)
-    cur->priority = next->priority;
-  else
+  if (list_empty(donor_list)) {
     cur->priority = cur->original_priority;
+  }
+  else {
+    // Recalculate priority by taking the top donor's priority
+    // this works cuz the list 'donors' is sorted by priority, desc
+    struct thread* next = (struct thread*) list_entry(list_front(&cur->donors), struct thread, donorelem);
+
+    if (next->priority > cur->original_priority)
+      cur->priority = next->priority;
+    else
+      cur->priority = cur->original_priority;
+  }
 
   // Possibly yield the thread now that the priority has been recalculated
   priority_yield();
