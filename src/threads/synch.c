@@ -207,19 +207,19 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
   struct thread* t = thread_current();
 
-  enum intr_level i = intr_disable();
   // Test if the lock is available.
   // If not, donate priority to the holder
+  enum intr_level i = intr_disable();
   if (lock->holder != NULL) {
     t->wait_lock = lock;
     // Add to donors list (sorted by priority)
     list_insert_ordered(&t->wait_lock->holder->donors, &t->donorelem, (list_less_func*)&thread_priority_cmp, NULL);
     donate_priority();
   }
+  intr_set_level(i);
   sema_down (&lock->semaphore);
   lock->holder = t;
   t->wait_lock = NULL;
-  intr_set_level(i);
 }
 
 
@@ -302,6 +302,7 @@ struct semaphore_elem
   {
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
+    struct thread *thread;              /* Thread waiting on semaphore. */
   };
 
 /* Initializes condition variable COND.  A condition variable
@@ -352,6 +353,15 @@ cond_wait (struct condition *cond, struct lock *lock)
   lock_acquire (lock);
 }
 
+
+static bool
+sema_priority_cmp (const struct list_elem *a, const struct list_elem *b,
+                          void *aux UNUSED)
+{
+  return list_entry (a, struct semaphore_elem, elem)->thread->priority
+    < list_entry (b, struct semaphore_elem, elem)->thread->priority;
+}
+
 /* If any threads are waiting on COND (protected by LOCK), then
    this function signals one of them to wake up from its wait.
    LOCK must be held before calling this function.
@@ -367,9 +377,15 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters))
-    sema_up (&list_entry (list_pop_front (&cond->waiters),
-                          struct semaphore_elem, elem)->semaphore);
+  enum intr_level old_level = intr_disable ();
+  struct list_elem *l = list_max (&cond->waiters, sema_priority_cmp, NULL);
+
+  if (l != list_end (&cond->waiters))
+    {
+      list_remove (l);
+      sema_up (&list_entry (l, struct semaphore_elem, elem)->semaphore);
+    }
+  intr_set_level (old_level);
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
